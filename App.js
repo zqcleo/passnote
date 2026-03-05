@@ -176,6 +176,8 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
   const [errors, setErrors] = useState({});
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [resetGestureVisible, setResetGestureVisible] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     password: '',
@@ -306,6 +308,17 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
     setSnackbarVisible(true);
   };
 
+  const handleResetGesture = async (newPattern) => {
+    try {
+      await AsyncStorage.setItem('gesturePattern', JSON.stringify(newPattern));
+      setResetGestureVisible(false);
+      setSnackbarMessage('手势密码重置成功');
+      setSnackbarVisible(true);
+    } catch (error) {
+      Alert.alert('错误', '手势密码重置失败');
+    }
+  };
+
   const filteredPasswords = passwords.filter(p =>
     p.website.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.username.toLowerCase().includes(searchQuery.toLowerCase())
@@ -319,6 +332,12 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
           icon={isDarkMode ? 'white-balance-sunny' : 'moon-waning-crescent'}
           onPress={() => setIsDarkMode(!isDarkMode)}
         />
+        {Platform.OS !== 'web' && (
+          <Appbar.Action
+            icon="cog"
+            onPress={() => setSettingsVisible(true)}
+          />
+        )}
       </Appbar.Header>
 
       <Searchbar
@@ -478,6 +497,53 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
         onPress={() => openModal()}
       />
 
+      {/* 设置对话框 */}
+      <Portal>
+        <Modal
+          visible={settingsVisible}
+          onDismiss={() => setSettingsVisible(false)}
+          contentContainerStyle={[styles.settingsModal, { backgroundColor: theme.colors.surface }]}
+        >
+          <Text variant="headlineSmall" style={styles.modalTitle}>
+            设置
+          </Text>
+          <Button
+            mode="outlined"
+            icon="gesture"
+            onPress={() => {
+              setSettingsVisible(false);
+              setResetGestureVisible(true);
+            }}
+            style={styles.settingsButton}
+          >
+            重置手势密码
+          </Button>
+          <Button
+            mode="text"
+            onPress={() => setSettingsVisible(false)}
+            style={styles.settingsButton}
+          >
+            关闭
+          </Button>
+        </Modal>
+      </Portal>
+
+      {/* 手势密码重置界面 */}
+      {resetGestureVisible && (
+        <Portal>
+          <Modal
+            visible={resetGestureVisible}
+            onDismiss={() => setResetGestureVisible(false)}
+            contentContainerStyle={styles.gestureResetModal}
+          >
+            <GesturePassword
+              isSetup={true}
+              onSetup={handleResetGesture}
+            />
+          </Modal>
+        </Portal>
+      )}
+
       <Snackbar
         visible={snackbarVisible}
         onDismiss={() => setSnackbarVisible(false)}
@@ -612,5 +678,17 @@ const styles = StyleSheet.create({
   },
   button: {
     minWidth: 100,
+  },
+  settingsModal: {
+    margin: 20,
+    padding: 20,
+    borderRadius: 8,
+  },
+  settingsButton: {
+    marginTop: 12,
+  },
+  gestureResetModal: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
 });
