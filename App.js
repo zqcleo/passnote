@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, ScrollView, Alert } from 'react-native';
-import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, Appbar, FAB, Portal, Modal, TextInput, Button, Card, Text, IconButton, Searchbar, Chip, useTheme } from 'react-native-paper';
+import { StyleSheet, View, ScrollView, Alert, Platform, Clipboard } from 'react-native';
+import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, Appbar, FAB, Portal, Modal, TextInput, Button, Card, Text, IconButton, Searchbar, Chip, useTheme, Snackbar } from 'react-native-paper';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const lightTheme = {
   ...MD3LightTheme,
@@ -42,8 +43,11 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
   const [editingId, setEditingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [visiblePasswords, setVisiblePasswords] = useState({});
+  const [showPasswordInForm, setShowPasswordInForm] = useState(true);
+  const [errors, setErrors] = useState({});
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
   const [formData, setFormData] = useState({
-    title: '',
     username: '',
     password: '',
     website: '',
@@ -59,7 +63,12 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
 
   const loadPasswords = async () => {
     try {
-      const stored = await SecureStore.getItemAsync('passwords');
+      let stored;
+      if (Platform.OS === 'web') {
+        stored = await AsyncStorage.getItem('passwords');
+      } else {
+        stored = await SecureStore.getItemAsync('passwords');
+      }
       if (stored) {
         setPasswords(JSON.parse(stored));
       }
@@ -70,18 +79,30 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
 
   const savePasswords = async (newPasswords) => {
     try {
-      await SecureStore.setItemAsync('passwords', JSON.stringify(newPasswords));
+      if (Platform.OS === 'web') {
+        await AsyncStorage.setItem('passwords', JSON.stringify(newPasswords));
+      } else {
+        await SecureStore.setItemAsync('passwords', JSON.stringify(newPasswords));
+      }
       setPasswords(newPasswords);
     } catch (error) {
       Alert.alert('错误', '保存失败');
+      console.error('保存失败:', error);
     }
   };
 
   const handleSave = async () => {
-    if (!formData.title || !formData.password) {
-      Alert.alert('提示', '标题和密码不能为空');
+    const newErrors = {};
+    if (!formData.website) newErrors.website = true;
+    if (!formData.username) newErrors.username = true;
+    if (!formData.password) newErrors.password = true;
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
       return;
     }
+
+    setErrors({});
 
     const newPassword = {
       id: editingId || await Crypto.randomUUID(),
@@ -126,7 +147,6 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
     } else {
       setEditingId(null);
       setFormData({
-        title: '',
         username: '',
         password: '',
         website: '',
@@ -140,6 +160,8 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
   const closeModal = () => {
     setVisible(false);
     setEditingId(null);
+    setShowPasswordInForm(true);
+    setErrors({});
   };
 
   const togglePasswordVisibility = (id) => {
@@ -149,10 +171,15 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
     }));
   };
 
+  const copyToClipboard = (text, label) => {
+    Clipboard.setString(text);
+    setSnackbarMessage(`${label}已复制到剪贴板`);
+    setSnackbarVisible(true);
+  };
+
   const filteredPasswords = passwords.filter(p =>
-    p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.website.toLowerCase().includes(searchQuery.toLowerCase())
+    p.website.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.username.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
@@ -185,7 +212,8 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
               <Card.Content>
                 <View style={styles.cardHeader}>
                   <View style={styles.cardTitleRow}>
-                    <Text variant="titleLarge">{item.title}</Text>
+                    <Text variant="titleLarge">{item.website}</Text>
+                    <View style={{ width: 8 }} />
                     <Chip compact>{item.category}</Chip>
                   </View>
                   <View style={styles.cardActions}>
@@ -194,26 +222,35 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
                   </View>
                 </View>
                 {item.username && (
-                  <Text variant="bodyMedium" style={styles.cardText}>
-                    <Text style={styles.label}>账号：</Text>{item.username}
-                  </Text>
+                  <View style={styles.clickableRow}>
+                    <Text variant="bodyMedium" style={styles.cardText}>
+                      <Text style={styles.label}>账号：</Text>{item.username}
+                    </Text>
+                    <IconButton
+                      icon="content-copy"
+                      size={16}
+                      onPress={() => copyToClipboard(item.username, '账号')}
+                    />
+                  </View>
                 )}
                 <View style={styles.passwordRow}>
                   <Text variant="bodyMedium" style={styles.cardText}>
                     <Text style={styles.label}>密码：</Text>
                     {visiblePasswords[item.id] ? item.password : '••••••••'}
                   </Text>
-                  <IconButton
-                    icon={visiblePasswords[item.id] ? 'eye-off' : 'eye'}
-                    size={20}
-                    onPress={() => togglePasswordVisibility(item.id)}
-                  />
+                  <View style={styles.passwordActions}>
+                    <IconButton
+                      icon="content-copy"
+                      size={16}
+                      onPress={() => copyToClipboard(item.password, '密码')}
+                    />
+                    <IconButton
+                      icon={visiblePasswords[item.id] ? 'eye-off' : 'eye'}
+                      size={20}
+                      onPress={() => togglePasswordVisibility(item.id)}
+                    />
+                  </View>
                 </View>
-                {item.website && (
-                  <Text variant="bodyMedium" style={styles.cardText}>
-                    <Text style={styles.label}>网站：</Text>{item.website}
-                  </Text>
-                )}
                 {item.notes && (
                   <Text variant="bodySmall" style={styles.notes}>
                     {item.notes}
@@ -232,33 +269,44 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
           </Text>
           <ScrollView>
             <TextInput
-              label="标题 *"
-              value={formData.title}
-              onChangeText={(text) => setFormData({ ...formData, title: text })}
+              label="网站/应用 *"
+              value={formData.website}
+              onChangeText={(text) => {
+                setFormData({ ...formData, website: text });
+                if (errors.website) setErrors({ ...errors, website: false });
+              }}
               style={styles.input}
               mode="outlined"
+              error={errors.website}
             />
             <TextInput
-              label="账号/用户名"
+              label="账号/用户名 *"
               value={formData.username}
-              onChangeText={(text) => setFormData({ ...formData, username: text })}
+              onChangeText={(text) => {
+                setFormData({ ...formData, username: text });
+                if (errors.username) setErrors({ ...errors, username: false });
+              }}
               style={styles.input}
               mode="outlined"
+              error={errors.username}
             />
             <TextInput
               label="密码 *"
               value={formData.password}
-              onChangeText={(text) => setFormData({ ...formData, password: text })}
+              onChangeText={(text) => {
+                setFormData({ ...formData, password: text });
+                if (errors.password) setErrors({ ...errors, password: false });
+              }}
               style={styles.input}
               mode="outlined"
-              secureTextEntry
-            />
-            <TextInput
-              label="网站/应用"
-              value={formData.website}
-              onChangeText={(text) => setFormData({ ...formData, website: text })}
-              style={styles.input}
-              mode="outlined"
+              error={errors.password}
+              secureTextEntry={!showPasswordInForm}
+              right={
+                <TextInput.Icon
+                  icon={showPasswordInForm ? 'eye-off' : 'eye'}
+                  onPress={() => setShowPasswordInForm(!showPasswordInForm)}
+                />
+              }
             />
             <Text variant="labelLarge" style={styles.categoryLabel}>分类</Text>
             <View style={styles.categoryContainer}>
@@ -286,6 +334,7 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
               <Button mode="outlined" onPress={closeModal} style={styles.button}>
                 取消
               </Button>
+              <View style={{ width: 8 }} />
               <Button mode="contained" onPress={handleSave} style={styles.button}>
                 保存
               </Button>
@@ -299,6 +348,14 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
         style={styles.fab}
         onPress={() => openModal()}
       />
+
+      <Snackbar
+        visible={snackbarVisible}
+        onDismiss={() => setSnackbarVisible(false)}
+        duration={2000}
+      >
+        {snackbarMessage}
+      </Snackbar>
     </View>
   );
 }
@@ -339,7 +396,6 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
   },
   cardActions: {
     flexDirection: 'row',
@@ -348,11 +404,21 @@ const styles = StyleSheet.create({
   cardText: {
     marginTop: 4,
   },
+  clickableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
   passwordRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 4,
+  },
+  passwordActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   label: {
     fontWeight: 'bold',
@@ -387,16 +453,15 @@ const styles = StyleSheet.create({
   categoryContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
     marginBottom: 12,
   },
   categoryChip: {
-    marginRight: 4,
+    marginRight: 8,
+    marginBottom: 8,
   },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 8,
     marginTop: 16,
   },
   button: {
