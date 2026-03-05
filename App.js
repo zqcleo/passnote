@@ -4,7 +4,9 @@ import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, Appbar, FAB, Po
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
+import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import GesturePassword from './GesturePassword';
 
 const lightTheme = {
   ...MD3LightTheme,
@@ -26,7 +28,134 @@ const darkTheme = {
 
 export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isLocked, setIsLocked] = useState(true);
+  const [hasGesturePassword, setHasGesturePassword] = useState(false);
+  const [gesturePattern, setGesturePattern] = useState(null);
+  const [showGestureSetup, setShowGestureSetup] = useState(false);
   const theme = isDarkMode ? darkTheme : lightTheme;
+
+  useEffect(() => {
+    checkAuthSettings();
+  }, []);
+
+  const checkAuthSettings = async () => {
+    if (Platform.OS === 'web') {
+      setIsLocked(false);
+      return;
+    }
+
+    try {
+      const storedPattern = await AsyncStorage.getItem('gesturePattern');
+      if (storedPattern) {
+        setHasGesturePassword(true);
+        setGesturePattern(JSON.parse(storedPattern));
+      } else {
+        setShowGestureSetup(true);
+      }
+    } catch (error) {
+      console.error('检查认证设置失败:', error);
+      setIsLocked(false);
+    }
+  };
+
+  const handleBiometricAuth = async () => {
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+      if (!hasHardware || !isEnrolled) {
+        return false;
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: '验证身份以访问密码',
+        fallbackLabel: '使用手势密码',
+        cancelLabel: '取消',
+      });
+
+      return result.success;
+    } catch (error) {
+      console.error('生物识别失败:', error);
+      return false;
+    }
+  };
+
+  const handleGestureSetup = async (pattern) => {
+    try {
+      await AsyncStorage.setItem('gesturePattern', JSON.stringify(pattern));
+      setGesturePattern(pattern);
+      setHasGesturePassword(true);
+      setShowGestureSetup(false);
+      setIsLocked(false);
+      Alert.alert('成功', '手势密码设置成功');
+    } catch (error) {
+      Alert.alert('错误', '手势密码设置失败');
+    }
+  };
+
+  const handleGestureUnlock = async () => {
+    setIsLocked(false);
+  };
+
+  const handleUnlock = async () => {
+    if (Platform.OS === 'web') {
+      setIsLocked(false);
+      return;
+    }
+
+    const biometricSuccess = await handleBiometricAuth();
+    if (!biometricSuccess && hasGesturePassword) {
+      // 生物识别失败，显示手势解锁
+      return;
+    } else if (biometricSuccess) {
+      setIsLocked(false);
+    }
+  };
+
+  if (Platform.OS !== 'web' && showGestureSetup) {
+    return (
+      <PaperProvider theme={theme}>
+        <StatusBar style={isDarkMode ? 'light' : 'dark'} />
+        <GesturePassword
+          isSetup={true}
+          onSetup={handleGestureSetup}
+        />
+      </PaperProvider>
+    );
+  }
+
+  if (Platform.OS !== 'web' && isLocked) {
+    return (
+      <PaperProvider theme={theme}>
+        <StatusBar style={isDarkMode ? 'light' : 'dark'} />
+        <View style={styles.lockScreen}>
+          <Text variant="headlineLarge" style={styles.lockTitle}>
+            密码备忘录
+          </Text>
+          <Text variant="bodyLarge" style={styles.lockSubtitle}>
+            请验证身份以继续
+          </Text>
+          <Button
+            mode="contained"
+            onPress={handleUnlock}
+            style={styles.unlockButton}
+            icon="fingerprint"
+          >
+            使用生物识别解锁
+          </Button>
+          {hasGesturePassword && (
+            <View style={{ marginTop: 20 }}>
+              <GesturePassword
+                isSetup={false}
+                storedPattern={gesturePattern}
+                onSuccess={handleGestureUnlock}
+              />
+            </View>
+          )}
+        </View>
+      </PaperProvider>
+    );
+  }
 
   return (
     <PaperProvider theme={theme}>
@@ -363,6 +492,23 @@ function MainApp({ isDarkMode, setIsDarkMode }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  lockScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  lockTitle: {
+    marginBottom: 10,
+    fontWeight: 'bold',
+  },
+  lockSubtitle: {
+    marginBottom: 30,
+    opacity: 0.7,
+  },
+  unlockButton: {
+    minWidth: 200,
   },
   searchbar: {
     margin: 16,
