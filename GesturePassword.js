@@ -6,13 +6,23 @@ const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = 60;
 const MARGIN = (width - CIRCLE_SIZE * 3) / 4;
 
-export default function GesturePassword({ onSuccess, onSetup, isSetup = false, storedPattern = null }) {
+export default function GesturePassword({ onSuccess, onSetup, isSetup = false, storedPattern = null, hideTitle = false }) {
   const theme = useTheme();
   const [pattern, setPattern] = useState([]);
   const [currentPos, setCurrentPos] = useState(null);
   const [lines, setLines] = useState([]);
   const [confirmPattern, setConfirmPattern] = useState(null);
   const [step, setStep] = useState(isSetup ? 'setup' : 'verify');
+
+  // Refs to avoid stale closures in PanResponder callbacks
+  const patternRef = useRef([]);
+  const linesRef = useRef([]);
+  const stepRef = useRef(isSetup ? 'setup' : 'verify');
+  const confirmPatternRef = useRef(null);
+
+  // Ref to get gestureArea's screen position for Android coordinate fix
+  const gestureAreaRef = useRef(null);
+  const gestureAreaOffset = useRef({ x: 0, y: 0 });
 
   const circles = [
     { id: 0, x: MARGIN, y: 100 },
@@ -26,25 +36,12 @@ export default function GesturePassword({ onSuccess, onSetup, isSetup = false, s
     { id: 8, x: MARGIN * 3 + CIRCLE_SIZE * 2, y: 100 + (MARGIN + CIRCLE_SIZE) * 2 },
   ];
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        const { locationX, locationY } = evt.nativeEvent;
-        checkCircleHit(locationX, locationY);
-      },
-      onPanResponderMove: (evt) => {
-        const { locationX, locationY } = evt.nativeEvent;
-        setCurrentPos({ x: locationX, y: locationY });
-        checkCircleHit(locationX, locationY);
-      },
-      onPanResponderRelease: () => {
-        setCurrentPos(null);
-        handlePatternComplete();
-      },
-    })
-  ).current;
+  const getLocalCoords = (evt) => {
+    return {
+      x: evt.nativeEvent.pageX - gestureAreaOffset.current.x,
+      y: evt.nativeEvent.pageY - gestureAreaOffset.current.y,
+    };
+  };
 
   const checkCircleHit = (x, y) => {
     circles.forEach((circle) => {
@@ -52,44 +49,52 @@ export default function GesturePassword({ onSuccess, onSetup, isSetup = false, s
         Math.pow(x - (circle.x + CIRCLE_SIZE / 2), 2) +
         Math.pow(y - (circle.y + CIRCLE_SIZE / 2), 2)
       );
-      if (distance < CIRCLE_SIZE / 2 && !pattern.includes(circle.id)) {
-        const newPattern = [...pattern, circle.id];
-        setPattern(newPattern);
-        if (pattern.length > 0) {
-          const lastCircle = circles[pattern[pattern.length - 1]];
-          setLines([...lines, {
+      if (distance < CIRCLE_SIZE / 2 && !patternRef.current.includes(circle.id)) {
+        if (patternRef.current.length > 0) {
+          const lastCircle = circles[patternRef.current[patternRef.current.length - 1]];
+          const newLines = [...linesRef.current, {
             x1: lastCircle.x + CIRCLE_SIZE / 2,
             y1: lastCircle.y + CIRCLE_SIZE / 2,
             x2: circle.x + CIRCLE_SIZE / 2,
             y2: circle.y + CIRCLE_SIZE / 2,
-          }]);
+          }];
+          linesRef.current = newLines;
+          setLines(newLines);
         }
+        const newPattern = [...patternRef.current, circle.id];
+        patternRef.current = newPattern;
+        setPattern(newPattern);
       }
     });
   };
 
   const handlePatternComplete = () => {
-    if (pattern.length < 4) {
+    const currentPattern = patternRef.current;
+    if (currentPattern.length < 4) {
       Alert.alert('提示', '至少连接4个点');
       resetPattern();
       return;
     }
 
-    if (step === 'setup') {
-      setConfirmPattern(pattern);
+    if (stepRef.current === 'setup') {
+      confirmPatternRef.current = currentPattern;
+      setConfirmPattern(currentPattern);
+      stepRef.current = 'confirm';
       setStep('confirm');
       resetPattern();
-    } else if (step === 'confirm') {
-      if (JSON.stringify(pattern) === JSON.stringify(confirmPattern)) {
-        onSetup(pattern);
+    } else if (stepRef.current === 'confirm') {
+      if (JSON.stringify(currentPattern) === JSON.stringify(confirmPatternRef.current)) {
+        onSetup(currentPattern);
       } else {
         Alert.alert('错误', '两次手势不一致，请重新设置');
-        setStep('setup');
+        confirmPatternRef.current = null;
         setConfirmPattern(null);
+        stepRef.current = 'setup';
+        setStep('setup');
         resetPattern();
       }
-    } else if (step === 'verify') {
-      if (JSON.stringify(pattern) === JSON.stringify(storedPattern)) {
+    } else if (stepRef.current === 'verify') {
+      if (JSON.stringify(currentPattern) === JSON.stringify(storedPattern)) {
         onSuccess();
       } else {
         Alert.alert('错误', '手势密码错误');
@@ -100,11 +105,33 @@ export default function GesturePassword({ onSuccess, onSetup, isSetup = false, s
 
   const resetPattern = () => {
     setTimeout(() => {
+      patternRef.current = [];
+      linesRef.current = [];
       setPattern([]);
       setLines([]);
       setCurrentPos(null);
     }, 300);
   };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const { x, y } = getLocalCoords(evt);
+        checkCircleHit(x, y);
+      },
+      onPanResponderMove: (evt) => {
+        const { x, y } = getLocalCoords(evt);
+        setCurrentPos({ x, y });
+        checkCircleHit(x, y);
+      },
+      onPanResponderRelease: () => {
+        setCurrentPos(null);
+        handlePatternComplete();
+      },
+    })
+  ).current;
 
   const getMessage = () => {
     if (step === 'setup') return '绘制手势密码（至少4个点）';
@@ -113,12 +140,23 @@ export default function GesturePassword({ onSuccess, onSetup, isSetup = false, s
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <Text variant="headlineMedium" style={styles.title}>
-        {getMessage()}
-      </Text>
+    <View style={styles.container}>
+      {!hideTitle && (
+        <Text variant="headlineMedium" style={styles.title}>
+          {getMessage()}
+        </Text>
+      )}
 
-      <View style={styles.gestureArea} {...panResponder.panHandlers}>
+      <View
+        ref={gestureAreaRef}
+        onLayout={() => {
+          gestureAreaRef.current?.measure((_x, _y, _w, _h, pageX, pageY) => {
+            gestureAreaOffset.current = { x: pageX, y: pageY };
+          });
+        }}
+        style={styles.gestureArea}
+        {...panResponder.panHandlers}
+      >
         {/* 绘制连线 */}
         {lines.map((line, index) => {
           const length = Math.sqrt(
@@ -189,7 +227,13 @@ export default function GesturePassword({ onSuccess, onSetup, isSetup = false, s
       </View>
 
       {step === 'setup' && (
-        <Button mode="text" onPress={() => setStep('setup')}>
+        <Button mode="text" onPress={() => {
+          patternRef.current = [];
+          linesRef.current = [];
+          setPattern([]);
+          setLines([]);
+          setCurrentPos(null);
+        }}>
           重新绘制
         </Button>
       )}

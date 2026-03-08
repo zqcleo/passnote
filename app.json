@@ -21,7 +21,8 @@
         "backgroundColor": "#6200ee"
       },
       "package": "com.passnote.app",
-      "permissions": []
+      "permissions": [],
+      "softwareKeyboardLayoutMode": "pan"
     },
     "web": {
     },
