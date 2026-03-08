@@ -24,12 +24,16 @@
       "permissions": [],
       "softwareKeyboardLayoutMode": "pan"
     },
-    "web": {
-    },
+    "web": {},
     "plugins": [
       "expo-asset",
       "expo-font",
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "06fedf8e-0a36-448c-9e0d-45872888802c"
+      }
+    }
   }
 }
